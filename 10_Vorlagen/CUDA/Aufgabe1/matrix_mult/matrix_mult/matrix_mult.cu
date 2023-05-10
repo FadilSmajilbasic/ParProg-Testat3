@@ -2,52 +2,115 @@
 
 // C = A * B
 
+// Matrix dimensions
 const int C_ROWS = 1000;
 const int C_COLS = 2000;
 const int A_COLS = 3000;
-
 const int A_ROWS = C_ROWS;
 const int B_ROWS = A_COLS;
 const int B_COLS = C_COLS;
+// Tile dimensions
+const int TILE_SIZE = 8;
 
 
-__global__ void matrixMultKernel(float *A, float *B, float *C) {
-      __shared__ float Asub[TILE_SIZE][TILE_SIZE];
-      __shared__ float Bsub[TILE_SIZE][TILE_SIZE];
+// Matrix multiplication kernel
+__global__ void matrixMultKernel(float* A, float* B, float* C) {
+    // Shared memory for the tiles
+    __shared__ float Asub[TILE_SIZE][TILE_SIZE];
+    __shared__ float Bsub[TILE_SIZE][TILE_SIZE];
 
-      int tx = threadIdx.x, ty = threadIdx.y;
-      int col = blockIdx.x * TILE_SIZE + tx;
-      int row = blockIdx.y * TILE_SIZE + ty;
-      int nofTiles = (A_COLS + TILE_SIZE - 1) / TILE_SIZE;
-      float sum = 0
-	  for (int i = 0; i < A_COLS; i++)
-	  {
-		sum += A[col * A_COLS + i] * B[i * B_COLS + row];
-	  }
-	  C[col * C_COLS + row] = sum;
+    // Thread and block indices
+    int tx = threadIdx.x;
+    int ty = threadIdx.y;
+    int bx = blockIdx.x;
+    int by = blockIdx.y;
+
+    // Global output indices
+    int row = by * TILE_SIZE + ty;
+    int col = bx * TILE_SIZE + tx;
+
+    // Accumulator for the partial result
+    float sum = 0.0f;
+
+    // Iterate over tiles of A and B
+    for (int t = 0; t < (A_COLS + TILE_SIZE - 1) / TILE_SIZE; t++) {
+        // Load tiles into shared memory
+        int Acol = t * TILE_SIZE + tx;
+        int Brow = t * TILE_SIZE + ty;
+
+        // Load element from A into shared memory
+        if (row < C_ROWS && Acol < A_COLS)
+            Asub[ty][tx] = A[row * A_COLS + Acol];
+        else
+            Asub[ty][tx] = 0.0f;
+
+        // Load element from B into shared memory
+        if (Brow < A_COLS && col < C_COLS)
+            Bsub[ty][tx] = B[Brow * C_COLS + col];
+        else
+            Bsub[ty][tx] = 0.0f;
+
+        // Synchronize to ensure all elements are loaded
+        __syncthreads();
+
+        // Perform the partial matrix multiplication within the tile
+        for (int k = 0; k < TILE_SIZE; k++) {
+            sum += Asub[ty][k] * Bsub[k][tx];
+        }
+
+        // Synchronize before loading the next tile
+        __syncthreads();
+    }
+
+    // Store the result in the output matrix
+    if (row < C_ROWS && col < C_COLS) {
+        C[row * C_COLS + col] = sum;
+    }
 }
 
-void cudaMatrixMult(float *A, float *B, float *C, int repetitions, bool warmup) {
-	clock_t start = clock();
+void cudaMatrixMult(float* A, float* B, float* C, int repetitions, bool warmup) {
 
-	for (int i = 0; i < repetitions; i++)
-	{
-		// TODO: Implement parallel tiled matrix multiplication on CUDA
+	// Allocate memory on the GPU
+	float* devA, * devB, * devC;
+	cudaMalloc((void**)&devA, A_ROWS * A_COLS * sizeof(float));
+	cudaMalloc((void**)&devB, A_COLS * B_COLS * sizeof(float));
+	cudaMalloc((void**)&devC, A_ROWS * B_COLS * sizeof(float));
+
+	// Copy input matrices from host to device
+	cudaMemcpy(devA, A, A_ROWS * A_COLS * sizeof(float), cudaMemcpyHostToDevice);
+	cudaMemcpy(devB, B, A_COLS * B_COLS * sizeof(float), cudaMemcpyHostToDevice);
+
+	// Set grid and block dimensions
+	const int BLOCK_SIZE = TILE_SIZE;
+	dim3 blockSize(BLOCK_SIZE, BLOCK_SIZE);
+	dim3 blocksPerGrid((C_COLS + TILE_SIZE - 1) / TILE_SIZE, (C_ROWS + TILE_SIZE - 1) / TILE_SIZE);
+    printf("blocksPerGrid: (%u, %u, %u)\n", blocksPerGrid.x, blocksPerGrid.y, blocksPerGrid.z);
+
+	clock_t start = clock();
+	for (int i = 0; i < repetitions; i++) {
+		matrixMultKernel << <blocksPerGrid, blockSize >> > (devA, devB, devC);
 	}
+
+	cudaMemcpy(C, devC, A_ROWS * B_COLS * sizeof(float), cudaMemcpyDeviceToHost);
+
+
 	if (!warmup)
 	{
 		float diff = float(clock() - start) / (CLOCKS_PER_SEC * repetitions);
 		printf("CUDA: %.3lf seconds\n", diff);
 	}
+	cudaFree(devA);
+	cudaFree(devB);
+	cudaFree(devC);
 }
 
-void fillRandomArray(float *A, int numElements) {
+void fillRandomArray(float* A, int numElements) {
 	for (int i = 0; i < numElements; i++) {
 		A[i] = rand() / (float)RAND_MAX;
 	}
 }
 
-void verifyResults(float *A, float *B, float *C) {
+void verifyResults(float* A, float* B, float* C) {
 	printf("Verifying ...");
 	for (int row = 0; row < C_ROWS; row++) {
 		for (int col = 0; col < C_COLS; col++) {
@@ -64,7 +127,7 @@ void verifyResults(float *A, float *B, float *C) {
 	printf(" done\n");
 }
 
-void sequentialMatrixMult(float *A, float *B, float *C) {
+void sequentialMatrixMult(float* A, float* B, float* C) {
 	clock_t start = clock();
 
 	for (int row = 0; row < C_ROWS; row++) {
@@ -83,17 +146,17 @@ void sequentialMatrixMult(float *A, float *B, float *C) {
 
 int main() {
 	int nofElemA = A_ROWS * A_COLS;
-	float *h_A = (float *)malloc(nofElemA * sizeof(float));
+	float* h_A = (float*)malloc(nofElemA * sizeof(float));
 	handleAllocationError(h_A);
 	fillRandomArray(h_A, nofElemA);
 
 	int nofElemB = B_ROWS * B_COLS;
-	float *h_B = (float *)malloc(nofElemB * sizeof(float));
+	float* h_B = (float*)malloc(nofElemB * sizeof(float));
 	handleAllocationError(h_B);
 	fillRandomArray(h_B, nofElemB);
-	
+
 	int nofElemC = C_ROWS * C_COLS;
-	float *h_C = (float *)malloc(nofElemC * sizeof(float));
+	float* h_C = (float*)malloc(nofElemC * sizeof(float));
 	handleAllocationError(h_C);
 
 	cudaMatrixMult(h_A, h_B, h_C, 2, true);
