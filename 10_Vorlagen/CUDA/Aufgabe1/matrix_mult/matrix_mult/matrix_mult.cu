@@ -12,25 +12,17 @@ const int B_COLS = C_COLS;
 // Tile dimensions
 const int TILE_SIZE = 8;
 
-
-// Matrix multiplication kernel
 __global__ void matrixMultKernel(float* A, float* B, float* C) {
-    // Shared memory for the tiles
     __shared__ float Asub[TILE_SIZE][TILE_SIZE];
     __shared__ float Bsub[TILE_SIZE][TILE_SIZE];
 
-    // Thread and block indices
-    int tx = threadIdx.x;
-    int ty = threadIdx.y;
-    int bx = blockIdx.x;
-    int by = blockIdx.y;
-
-    // Global output indices
-    int row = by * TILE_SIZE + ty;
-    int col = bx * TILE_SIZE + tx;
-
-    // Accumulator for the partial result
-    float sum = 0.0f;
+    int tx = threadIdx.x, ty = threadIdx.y;
+    int col = blockIdx.x * TILE_SIZE + tx;
+    int row = blockIdx.y * TILE_SIZE + ty;
+    
+    float sum = 0;
+    
+    
 
     // Iterate over tiles of A and B
     for (int t = 0; t < (A_COLS + TILE_SIZE - 1) / TILE_SIZE; t++) {
@@ -39,17 +31,11 @@ __global__ void matrixMultKernel(float* A, float* B, float* C) {
         int Brow = t * TILE_SIZE + ty;
 
         // Load element from A into shared memory
-        if (row < C_ROWS && Acol < A_COLS)
-            Asub[ty][tx] = A[row * A_COLS + Acol];
-        else
-            Asub[ty][tx] = 0.0f;
+        Asub[ty][tx] = A[row * A_COLS + Acol];
 
         // Load element from B into shared memory
-        if (Brow < A_COLS && col < C_COLS)
-            Bsub[ty][tx] = B[Brow * C_COLS + col];
-        else
-            Bsub[ty][tx] = 0.0f;
-
+        Bsub[ty][tx] = B[Brow * C_COLS + col];
+        
         // Synchronize to ensure all elements are loaded
         __syncthreads();
 
@@ -62,10 +48,7 @@ __global__ void matrixMultKernel(float* A, float* B, float* C) {
         __syncthreads();
     }
 
-    // Store the result in the output matrix
-    if (row < C_ROWS && col < C_COLS) {
-        C[row * C_COLS + col] = sum;
-    }
+    C[row * C_COLS + col] = sum;
 }
 
 void cudaMatrixMult(float* A, float* B, float* C, int repetitions, bool warmup) {
@@ -84,8 +67,7 @@ void cudaMatrixMult(float* A, float* B, float* C, int repetitions, bool warmup) 
 	const int BLOCK_SIZE = TILE_SIZE;
 	dim3 blockSize(BLOCK_SIZE, BLOCK_SIZE);
 	dim3 blocksPerGrid((C_COLS + TILE_SIZE - 1) / TILE_SIZE, (C_ROWS + TILE_SIZE - 1) / TILE_SIZE);
-    printf("blocksPerGrid: (%u, %u, %u)\n", blocksPerGrid.x, blocksPerGrid.y, blocksPerGrid.z);
-
+    
 	clock_t start = clock();
 	for (int i = 0; i < repetitions; i++) {
 		matrixMultKernel << <blocksPerGrid, blockSize >> > (devA, devB, devC);
