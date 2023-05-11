@@ -25,3 +25,16 @@ If the tile size is greater than 32, the multiplications are not executed becaus
 
 #### Task 1.2
 
+Performance based on tile size with swapped rows and columns:
+
+| Tile size | Time elapsed (Pass 1) | Time elapsed (Pass 2) |
+|-----------|-----------------------|-----------------------|
+| 5         | 0.035                 | 0.034                 |
+| 8         | 0.014                 | 0.015                 |
+| 10        | 0.015                 | 0.015                 |
+| 16        | 0.019                 | 0.019                 |
+| 20        | 0.012                 | 0.012                 |
+| 25        | 0.014                 | 0.014                 |
+| 30        | 0.014                 | 0.014                 |
+| 32        | 0.034                 | 0.034                 |
+| 40        | Failed                | Failed                |
