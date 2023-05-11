@@ -9,84 +9,77 @@ const int A_COLS = 3000;
 const int A_ROWS = C_ROWS;
 const int B_ROWS = A_COLS;
 const int B_COLS = C_COLS;
-const int TILE_SIZE = 8;
 
-
-
+const int TILE_SIZE = 32;
 
 __global__ void matrixMultKernel(float* A, float* B, float* C) {
     __shared__ float Asub[TILE_SIZE][TILE_SIZE];
     __shared__ float Bsub[TILE_SIZE][TILE_SIZE];
 
     int tx = threadIdx.x, ty = threadIdx.y;
-    int col = blockIdx.x * TILE_SIZE + tx;
-    int row = blockIdx.y * TILE_SIZE + ty;
-
+    int row = blockIdx.x * TILE_SIZE + tx;
+    int col = blockIdx.y * TILE_SIZE + ty;
+    
     float sum = 0;
-
-    // Iterate over tiles of A and B
+    
     for (int t = 0; t < (A_COLS + TILE_SIZE - 1) / TILE_SIZE; t++) {
-        // Load tiles into shared memory
-        int Acol = t * TILE_SIZE + tx;
-        int Brow = t * TILE_SIZE + ty;
+        int Acol = t * TILE_SIZE + ty;
+        int Brow = t * TILE_SIZE + tx;
 
-        // Load element from A into shared memory
-        Asub[ty][tx] = B[Brow * C_COLS + col];
+        if (row < C_ROWS && Acol < A_COLS)
+            Asub[tx][ty] = A[row * A_COLS + Acol];
+        else
+            Asub[tx][ty] = 0.0f;
 
-        // Load element from B into shared memory
-            
-        Bsub[ty][tx] = A[row * A_COLS + Acol];
+        if (Brow < A_COLS && col < C_COLS)
+            Bsub[tx][ty] = B[Brow * C_COLS + col];
+        else
+            Bsub[tx][ty] = 0.0f;
+       
+       
+         __syncthreads();
 
-        // Synchronize to ensure all elements are loaded
-        __syncthreads();
-
-        // Perform the partial matrix multiplication within the tile
         for (int k = 0; k < TILE_SIZE; k++) {
-            sum += Asub[ty][k] * Bsub[k][tx];
+            sum += Asub[tx][k] * Bsub[k][ty];
         }
-        
-
-        // Synchronize before loading the next tile
         __syncthreads();
     }
 
-    // Store the result in the output matrix
+    if (row < C_ROWS && col < C_COLS) {
         C[row * C_COLS + col] = sum;
+    }
 }
 
 void cudaMatrixMult(float* A, float* B, float* C, int repetitions, bool warmup) {
 
-	// Allocate memory on the GPU
-	float* devA, * devB, * devC;
-	cudaMalloc((void**)&devA, A_ROWS * A_COLS * sizeof(float));
-	cudaMalloc((void**)&devB, A_COLS * B_COLS * sizeof(float));
-	cudaMalloc((void**)&devC, A_ROWS * B_COLS * sizeof(float));
+    float* devA, * devB, * devC;
+    cudaMalloc((void**)&devA, A_ROWS * A_COLS * sizeof(float));
+    cudaMalloc((void**)&devB, A_COLS * B_COLS * sizeof(float));
+    cudaMalloc((void**)&devC, A_ROWS * B_COLS * sizeof(float));
 
-	// Copy input matrices from host to device
-	cudaMemcpy(devA, A, A_ROWS * A_COLS * sizeof(float), cudaMemcpyHostToDevice);
-	cudaMemcpy(devB, B, A_COLS * B_COLS * sizeof(float), cudaMemcpyHostToDevice);
+    cudaMemcpy(devA, A, A_ROWS * A_COLS * sizeof(float), cudaMemcpyHostToDevice);
+    cudaMemcpy(devB, B, A_COLS * B_COLS * sizeof(float), cudaMemcpyHostToDevice);
 
-	// Set grid and block dimensions
-	const int BLOCK_SIZE = TILE_SIZE;
-	dim3 blockSize(BLOCK_SIZE, BLOCK_SIZE);
-	dim3 blocksPerGrid((C_COLS + TILE_SIZE - 1) / TILE_SIZE, (C_ROWS + TILE_SIZE - 1) / TILE_SIZE);
+    const int BLOCK_SIZE = TILE_SIZE;
+    dim3 blockSize(BLOCK_SIZE, BLOCK_SIZE);
+    dim3 blocksPerGrid((C_ROWS + TILE_SIZE - 1) / TILE_SIZE, ( C_COLS + TILE_SIZE - 1) / TILE_SIZE);
     
-	clock_t start = clock();
-	for (int i = 0; i < repetitions; i++) {
-		matrixMultKernel << <blocksPerGrid, blockSize >> > (devA, devB, devC);
-	}
+    clock_t start = clock();
+    for (int i = 0; i < repetitions; i++) {
+        matrixMultKernel << <blocksPerGrid, blockSize >> > (devA, devB, devC);
+    }
 
-	cudaMemcpy(C, devC, A_ROWS * B_COLS * sizeof(float), cudaMemcpyDeviceToHost);
+    cudaMemcpy(C, devC, A_ROWS * B_COLS * sizeof(float), cudaMemcpyDeviceToHost);
 
 
-	if (!warmup)
-	{
-		float diff = float(clock() - start) / (CLOCKS_PER_SEC * repetitions);
-		printf("CUDA: %.3lf seconds\n", diff);
-	}
-	cudaFree(devA);
-	cudaFree(devB);
-	cudaFree(devC);
+    if (!warmup)
+    {
+        float diff = float(clock() - start) / (CLOCKS_PER_SEC * repetitions);
+        printf("CUDA: %.3lf seconds\n", diff);
+    }
+    cudaFree(devA);
+    cudaFree(devB);
+    cudaFree(devC);
 }
 
 void fillRandomArray(float* A, int numElements) {
