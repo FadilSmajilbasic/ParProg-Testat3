@@ -23,6 +23,9 @@ Overall, the trend seems to be that the larger the tile size, the faster the exe
 It seems like we get a better performance when the tile size is a power of 2.
 If the tile size is greater than 32, the multiplications are not executed because there is probably a problem with boundaries and I'm receiving an error.
 
+![matrix_mult_plot](https://github.com/FadilSmajilbasic/ParProg-Testat3/assets/37296353/41385dbf-6fff-46c7-8395-d0b8ea9fccc9)
+
+
 #### Task 1.2
 
 Performance based on tile size with swapped rows and columns:
@@ -38,3 +41,7 @@ Performance based on tile size with swapped rows and columns:
 | 30        | 0.014                 | 0.014                 |
 | 32        | 0.034                 | 0.034                 |
 | 40        | Failed                | Failed                |
+
+![matrix_mult_plot_swapped](https://github.com/FadilSmajilbasic/ParProg-Testat3/assets/37296353/234ce46b-5611-4bf6-9e00-2b98c7f0df4c)
+
+
